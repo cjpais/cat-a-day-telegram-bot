@@ -71,8 +71,7 @@ dp.add_handler(CommandHandler('start', start))
 dp.add_handler(CommandHandler('stop', stop))
 dp.add_handler(CommandHandler('cat', cat))
 dp.add_handler(InlineQueryHandler(inlinequery))
-
-# dp.add_handler(MessageHandler(Filters.text, parse_message_response, pass_job_queue=True))
+dp.add_handler(MessageHandler(Filters.text, parse_message_response, pass_job_queue=True))
 
 updater.start_polling()
 updater.idle()
