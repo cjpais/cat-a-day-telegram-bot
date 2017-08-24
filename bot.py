@@ -1,10 +1,9 @@
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, InlineQueryHandler, Job
 import telegram
+from telegram import InlineQueryResultArticle, ParseMode, \
+    InputTextMessageContent
 import urllib2
-import logging
-import dill
 import os
-from threading import Timer
 import keys
 
 def start(bot, update):
@@ -15,68 +14,65 @@ def start(bot, update):
     reply_markup = telegram.ReplyKeyboardMarkup(schedule_keyboard, 
                                                 one_time_keyboard=True)
     print "hi %s" % reply_markup
-    bot.send_message(chat_id=update.message.chat.id, 
+    bot.send_message(chat_id=update.message.chat_id, 
                      text="Choose a cat delivery frequency", 
                      reply_markup=reply_markup)
 
 def stop(bot, update):
-    if os.path.exists('chats.p'):
-        with open('chats.p') as o_chat:
-            chats = dill.load(o_chat)
-    chats[update.message.chat_id].cancel()
+    jobs[update.message.chat_id].schedule_removal()
+    bot.send_message(chat_id=update.message.chat_id, 
+                     text="Cat delivered stopped")
 
-def send_cat(bot, update):
-    c_id = update.message.chat_id
-    bot.send_chat_action(chat_id=c_id, action=telegram.ChatAction.TYPING)
-    bot.send_photo(chat_id=c_id, photo=urllib2.urlopen(keys.cat_url).geturl())
+def cat(bot, update):
+    send_cat(bot, update.message.chat_id)
 
-def parse_message_response(bot, update):
+def send_cat(bot, c_id):
+    bot.send_chat_action(chat_id=c_id,
+                         action=telegram.ChatAction.TYPING)
+    bot.send_photo(chat_id=c_id,
+                   photo=urllib2.urlopen(keys.cat_url).geturl())
+
+def inlinequery(bot, update):
+    send_cat(bot, update.message.chat_id)
+
+def cat_callback(bot, job):
+    send_cat(bot, job.context)
+
+def parse_message_response(bot, update, job_queue):
     chat_id = update.message.chat_id
     user_response = update.message.text.lower()
-    
-    if os.path.exists('chats.p'):
-        with open('chats.p') as o_chat:
-            chats = dill.load(o_chat)
-    else:
-        chats = {}
-        with open('chats.p', 'w') as o_chat:
-            dill.dump(chats, o_chat)
 
-    if user_response == "once a day":
-        send_cat(bot, update)
-        timer = Timer(10, send_cat, [bot, update])
-        timer.start()
-        chats[chat_id] = timer
+    if user_response == "fast":
+        job = Job(cat_callback, 10.0, context=chat_id)
+        jobs[chat_id] = job
+        jq.put(job, next_t=0.0)
+    elif user_response == "once a day":
+        job = Job(cat_callback, 60*60*24, context=chat_id)
+        jobs[chat_id] = job
+        jq.put(job, next_t=0.0)
     elif user_response == "twice a day":
-        send_cat(bot, update)
-        timer = Timer(10, send_cat, [bot, update])
-        timer.start()
-        chats[chat_id] = timer
+        job = Job(cat_callback, 60*30*24, context=chat_id)
+        jobs[chat_id] = job
+        jq.put(job, next_t=0.0)
     elif user_response == "once a week":
-        send_cat(bot, update)
-        timer = Timer(10, send_cat, [bot, update])
-        timer.start()
-        chats[chat_id] = timer
-    elif user_response == "test":
-        send_cat(bot, update)
-        timer = Timer(10, send_cat, [bot, update])
-        timer.start()
-        chats[chat_id] = timer
+        job = Job(cat_callback, 60*60*24*7, context=chat_id)
+        jobs[chat_id] = job
+        jq.put(job, next_t=0.0)
     elif user_response == "stop":
-        bot.send_message(chat_id=chat_id, text="Bye")
-        chats[chat_id].cancel()
+        stop(bot, update)
 
-    with open('chats.p', 'w') as o_chat:
-        dill.dump(chats, o_chat)
-
-print keys.bot_key
 updater = Updater(keys.bot_key)
-dispatcher = updater.dispatcher
 
-dispatcher.add_handler(CommandHandler('start', start))
-dispatcher.add_handler(CommandHandler('cat', send_cat))
-dispatcher.add_handler(CommandHandler('stop', stop))
-dispatcher.add_handler(MessageHandler(Filters.text, parse_message_response))
+jobs = {}
+jq = updater.job_queue
+dp = updater.dispatcher
+
+dp.add_handler(CommandHandler('start', start))
+dp.add_handler(CommandHandler('stop', stop))
+dp.add_handler(CommandHandler('cat', cat))
+dp.add_handler(InlineQueryHandler(inlinequery))
+
+# dp.add_handler(MessageHandler(Filters.text, parse_message_response, pass_job_queue=True))
 
 updater.start_polling()
 updater.idle()
